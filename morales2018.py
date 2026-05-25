@@ -13,7 +13,9 @@ from mxlpy import Model
 
 
 R_GAS = 8314.0  # J kmol-1 K-1, consistent with Morales parameter scale
-
+AIR_PRESSURE = 1.01e8
+FLUX0 = 1e-22
+TREF = 298.15
 
 def _par(Ib, Ig, Ir):
     return Ib + Ig + Ir
@@ -37,12 +39,61 @@ def _peaked_arrhenius(T, value25, Ha, Hd, S):
     deactivation_t = 1.0 + np.exp((T * S - Hd) / (T * R_GAS))
     return value25 * activation * deactivation_ref / deactivation_t
 
+def _phiqe(fP, fZ, gamma1, gamma2, gamma3, PhiqEmax):
+    return (fP * gamma1 + fP * fZ * gamma2 + fZ * gamma3) * PhiqEmax
+
+def _rp(PR, kPR):
+    return 0.5 * PR * kPR
+
+def _sc(Scm, falphaSc, alphar):
+    return Scm * falphaSc * alphar
+
+def _kmapp_rubp(KmRuBP, PGA, Vch, KiPGA):
+    return KmRuBP * (1 + PGA / (Vch * KiPGA))
+
+def _frca(Tl, DHdRCA, ToRCA, DHaRCA):
+    return (DHdRCA * np.exp(((Tl - ToRCA) * DHaRCA) / (ToRCA * R_GAS * Tl))) / (
+        DHdRCA - DHaRCA * (1 - np.exp((DHdRCA * (Tl - ToRCA)) / (ToRCA * R_GAS * Tl)))
+    )
+
+def _fmax(RCA, fRCA, KaRCA):
+    return (RCA * fRCA) / (RCA * fRCA + KaRCA)
+
+def _para_p2(sigma2, alphar, PARaP):
+    return sigma2 * alphar * PARaP
+
+def _frubp(RB, Vch, Kmapp_RuBP, RuBP):
+    inner = (RB / Vch + Kmapp_RuBP + RuBP / Vch) ** 2 - (4 * RB * RuBP) / (Vch ** 2)
+    return (1 / ((2 * RB) / Vch)) * (
+        (RB / Vch + Kmapp_RuBP + RuBP / Vch) - np.sqrt(max(inner, 0.0))
+    )
+
+def _phi(Kmc, Ko, O2, Kmo, Kc, Cc):
+    return (Kmc * Ko * O2) / (Kmo * Kc * Cc)
+
+def _vc(fRB, fRuBP, Kc, RB, Cc, Kmc, O2, Kmo):
+    return (fRB * fRuBP * Kc * RB * Cc) / (Cc + Kmc * (1.0 + O2 / Kmo))
+
+def _vr_tpu(TPU, phi):
+    return (3.0 * TPU * (2.0 + 1.5 * phi)) / (1 - 0.5 * phi)
+
+def _vre(fR, Vrmax, PGA, KmPGA):
+    return (fR * Vrmax * PGA) / (PGA + KmPGA)
+
+def _a(Ci, Ccyt, gw):
+    return (Ci - Ccyt) * gw
+
+def _gm(A, Ci, Cc):
+    return A / (Ci - Cc)
+
+def _vr(VrJ, VrTPU, VrE):
+    return min(VrJ, VrTPU, VrE)
 
 def get_morales2018() -> Model:
     """Return Morales et al. 2018 dynamic photosynthesis model skeleton."""
 
     m: Model = Model()
-
+    
     states = {
         "PGA": 0.00005, "RuBP": 0.00005, "fRB": 0.25,
         "fP": 0.0, "fZ": 0.0, "alphar": 1.0,
@@ -145,5 +196,21 @@ def get_morales2018() -> Model:
     m = m.add_derived("Rm", fn=_arrhenius, args=["Tl", "Rm25", "DHaRm"])
     m = m.add_derived("gcm", fn=_peaked_arrhenius, args=["Tl", "gcm25", "DHaGc", "DHdGc", "DsGc"])
     m = m.add_derived("gw", fn=_peaked_arrhenius, args=["Tl", "gw25", "DHaGw", "DHdGw", "DsGw"])
+    
+    # First physiological derived quantities from Morales C++ core
+    m = m.add_derived("PhiqE", fn=_phiqe, args=["fP", "fZ", "gamma1", "gamma2", "gamma3", "PhiqEmax"])
+    m = m.add_derived("Rp", fn=_rp, args=["PR", "kPR"])
+    m = m.add_derived("Sc", fn=_sc, args=["Scm", "falphaSc", "alphar"])
+    m = m.add_derived("Kmapp_RuBP", fn=_kmapp_rubp, args=["KmRuBP", "PGA", "Vch", "KiPGA"])
+    m = m.add_derived("fRCA", fn=_frca, args=["Tl", "DHdRCA", "ToRCA", "DHaRCA"])
+    m = m.add_derived("fRBmax_calc", fn=_fmax, args=["RCA", "fRCA", "KaRCA"])
+    m = m.add_derived("PARaP2", fn=_para_p2, args=["sigma2", "alphar", "PARaP"])
+    m = m.add_derived("fRuBP_calc", fn=_frubp, args=["RB", "Vch", "Kmapp_RuBP", "RuBP"])
+    m = m.add_derived("phi", fn=_phi, args=["Kmc", "Ko", "O2", "Kmo", "Kc", "Cc"])
+    m = m.add_derived("Vc_calc", fn=_vc, args=["fRB", "fRuBP_calc", "Kc", "RB", "Cc", "Kmc", "O2", "Kmo"])
+    m = m.add_derived("VrTPU", fn=_vr_tpu, args=["TPU", "phi"])
+    m = m.add_derived("VrE", fn=_vre, args=["fR", "Vrmax", "PGA", "KmPGA"])
+    m = m.add_derived("A_calc", fn=_a, args=["Ci", "Ccyt", "gw"])
+    m = m.add_derived("gm_calc", fn=_gm, args=["A_calc", "Ci", "Cc"])
 
     return m
