@@ -5,10 +5,14 @@ Initial mxlpy implementation skeleton:
 - 16 state variables
 - 7 environmental forcings as temporary parameters
 - 103 model parameters
-- first derived light equations
+- first derived light and temperature-response equations
 """
 
+import numpy as np
 from mxlpy import Model
+
+
+R_GAS = 8314.0  # J kmol-1 K-1, consistent with Morales parameter scale
 
 
 def _par(Ib, Ig, Ir):
@@ -21,6 +25,17 @@ def _para(Ib, Ig, Ir, alphab, alphag, alphared):
 
 def _parap(Ib, Ig, Ir, alphabp, alphagp, alpharp):
     return Ib * alphabp + Ig * alphagp + Ir * alpharp
+
+
+def _arrhenius(T, value25, Ha):
+    return value25 * np.exp((Ha * (T - 298.15)) / (298.15 * R_GAS * T))
+
+
+def _peaked_arrhenius(T, value25, Ha, Hd, S):
+    activation = np.exp((Ha * (T - 298.15)) / (298.15 * R_GAS * T))
+    deactivation_ref = 1.0 + np.exp((298.15 * S - Hd) / (298.15 * R_GAS))
+    deactivation_t = 1.0 + np.exp((T * S - Hd) / (T * R_GAS))
+    return value25 * activation * deactivation_ref / deactivation_t
 
 
 def get_morales2018() -> Model:
@@ -36,7 +51,6 @@ def get_morales2018() -> Model:
         "Ca": 0.00038, "H2OS": 0.02000, "gsw": 0.09000,
         "sumA": 0.0,
     }
-
     for name, value in states.items():
         m = m.add_variable(name, initial_value=value)
 
@@ -45,7 +59,6 @@ def get_morales2018() -> Model:
         "Ta": 298.15, "Tl": 298.15,
         "H2OR": 0.015, "CO2R": 0.00038,
     }
-
     for name, value in forcings.items():
         m = m.add_parameter(name, value=value)
 
@@ -103,7 +116,6 @@ def get_morales2018() -> Model:
         "alphabp": 6.6000e-01, "alphagp": 6.0000e-01,
         "alpharp": 8.0000e-01,
     }
-
     for name, value in parameters.items():
         m = m.add_parameter(name, value=value)
 
@@ -113,22 +125,25 @@ def get_morales2018() -> Model:
         "qM", "Rp", "A", "gss", "VPDleaf", "Sc", "Photo",
         "transpiration", "Trmmol", "Cond", "gm", "reg_limit",
     ]
-
     for readout in morales_readouts:
         m = m.add_parameter(f"readout_placeholder_{readout}", value=0.0)
 
+    # Light-derived quantities
     m = m.add_derived("PAR", fn=_par, args=["Ib", "Ig", "Ir"])
+    m = m.add_derived("PARa", fn=_para, args=["Ib", "Ig", "Ir", "alphab", "alphag", "alphared"])
+    m = m.add_derived("PARaP", fn=_parap, args=["Ib", "Ig", "Ir", "alphabp", "alphagp", "alpharp"])
 
-    m = m.add_derived(
-        "PARa",
-        fn=_para,
-        args=["Ib", "Ig", "Ir", "alphab", "alphag", "alphared"],
-    )
+    # Temperature-dependent biochemical capacities
+    m = m.add_derived("Jmax", fn=_peaked_arrhenius, args=["Tl", "Jmax25", "DHaJmax", "DHdJmax", "DsJmax"])
+    m = m.add_derived("Krep", fn=_peaked_arrhenius, args=["Tl", "Krep25", "DHaKrep", "DHdKrep", "DsKrep"])
+    m = m.add_derived("TPU", fn=_peaked_arrhenius, args=["Tl", "TPU25", "DHaTPU", "DHdTPU", "DsTPU"])
 
-    m = m.add_derived(
-        "PARaP",
-        fn=_parap,
-        args=["Ib", "Ig", "Ir", "alphabp", "alphagp", "alpharp"],
-    )
+    m = m.add_derived("Kc", fn=_arrhenius, args=["Tl", "Kc25", "DHaKc"])
+    m = m.add_derived("Ko", fn=_arrhenius, args=["Tl", "Ko25", "DHaKo"])
+    m = m.add_derived("Kmc", fn=_arrhenius, args=["Tl", "Kmc25", "DHaKmc"])
+    m = m.add_derived("Kmo", fn=_arrhenius, args=["Tl", "Kmo25", "DHaKmo"])
+    m = m.add_derived("Rm", fn=_arrhenius, args=["Tl", "Rm25", "DHaRm"])
+    m = m.add_derived("gcm", fn=_peaked_arrhenius, args=["Tl", "gcm25", "DHaGc", "DHdGc", "DsGc"])
+    m = m.add_derived("gw", fn=_peaked_arrhenius, args=["Tl", "gw25", "DHaGw", "DHdGw", "DsGw"])
 
     return m
