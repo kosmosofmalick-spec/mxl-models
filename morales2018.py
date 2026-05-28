@@ -89,6 +89,27 @@ def _gm(A, Ci, Cc):
 def _vr(VrJ, VrTPU, VrE):
     return min(VrJ, VrTPU, VrE)
 
+
+def _identity(x):
+    return x
+
+
+def _min2(x, y):
+    return min(x, y)
+
+
+def _d_pga_dt(Vc, phi, Vr):
+    return (2.0 * Vc + 1.5 * Vc * phi) - Vr
+
+
+def _d_rubp_dt(phi, Vr, Vc):
+    return ((1.0 + phi) / (2.0 + 1.5 * phi)) * Vr - Vc * (1.0 + phi)
+
+
+def _d_pr_dt(Vc, phi, PR, kPR):
+    return Vc * phi - PR * kPR
+
+
 def get_morales2018() -> Model:
     """Return Morales et al. 2018 dynamic photosynthesis model skeleton."""
 
@@ -210,7 +231,35 @@ def get_morales2018() -> Model:
     m = m.add_derived("Vc_calc", fn=_vc, args=["fRB", "fRuBP_calc", "Kc", "RB", "Cc", "Kmc", "O2", "Kmo"])
     m = m.add_derived("VrTPU", fn=_vr_tpu, args=["TPU", "phi"])
     m = m.add_derived("VrE", fn=_vre, args=["fR", "Vrmax", "PGA", "KmPGA"])
+    m = m.add_derived("Vr", fn=_min2, args=["VrTPU", "VrE"])
     m = m.add_derived("A_calc", fn=_a, args=["Ci", "Ccyt", "gw"])
     m = m.add_derived("gm_calc", fn=_gm, args=["A_calc", "Ci", "Cc"])
+
+    # =========================================================
+    # Morales 2018 — first exact dynamic reaction layer
+    # These reactions encode the directly available ODE terms from
+    # the original C++ derivative structure.
+    # =========================================================
+
+    m = m.add_reaction(
+        "dPGA_dt",
+        fn=_d_pga_dt,
+        args=["Vc_calc", "phi", "Vr"],
+        stoichiometry={"PGA": 1.0},
+    )
+
+    m = m.add_reaction(
+        "dRuBP_dt",
+        fn=_d_rubp_dt,
+        args=["phi", "Vr", "Vc_calc"],
+        stoichiometry={"RuBP": 1.0},
+    )
+
+    m = m.add_reaction(
+        "dPR_dt",
+        fn=_d_pr_dt,
+        args=["Vc_calc", "phi", "PR", "kPR"],
+        stoichiometry={"PR": 1.0},
+    )
 
     return m
