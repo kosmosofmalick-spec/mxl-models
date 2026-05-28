@@ -343,6 +343,9 @@ def _gsc(gsw):
 def _mv(Ta):
     return (R_GAS * Ta) / AIR_PRESSURE
 
+def _identity(x):
+    return x
+
 
 def _ea(H2OR):
     return H2OR * AIR_PRESSURE
@@ -586,5 +589,31 @@ def get_morales2018() -> Model:
     m = m.add_reaction("dCa_dt", fn=_d_ca_dt, args=["Flow", "Ca", "CO2R", "leaf_surface", "A", "Ta", "volume_chamber"], stoichiometry={"Ca": 1.0})
     m = m.add_reaction("dH2OS_dt", fn=_d_h2os_dt, args=["Flow", "leaf_surface", "transpiration", "H2OS", "H2OR", "Ta", "volume_chamber"], stoichiometry={"H2OS": 1.0})
     m = m.add_reaction("dgsw_dt", fn=_d_gsw_dt, args=["gss", "gsw", "Kgsi", "Kgsd"], stoichiometry={"gsw": 1.0})
+    
+    # Morales 2018 observed/readout variables
+    # ==========================================================
+    # Morales 2018 observed outputs
+    # ==========================================================
+    observed = [
+        "Vr", "Vc", "fRuBP", "PARaP", "PARa", "PAR",
+        "fqEss", "PhiqE", "PhiIIoss", "PhiIIo",
+        "qP", "PhiII", "VrJ", "NPQ", "qI", "qE",
+        "qM", "Rp", "A", "gss", "VPDleaf", "Sc",
+        "Photo", "transpiration", "Trmmol", "Cond",
+        "gm", "reg_limit",
+    ]
+
+    for name in observed:
+        m = m.add_readout(f"obs_{name}", fn=_identity, args=[name])
+        
+# ==========================================================
+# Solver settings recovered from original Morales R wrapper
+# ==========================================================
+
+        # Original Morales R wrapper solver settings:
+    # rtol = 1e-6, atol = 1e-6, method = "bdf", positive = 1
+    m = m.add_parameter("solver_rtol", value=1e-6)
+    m = m.add_parameter("solver_atol", value=1e-6)
+    m = m.add_parameter("solver_positive", value=1.0)
 
     return m
